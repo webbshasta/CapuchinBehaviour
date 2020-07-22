@@ -1,0 +1,498 @@
+---
+title: "BehaviouralAnalysisByStage"
+author: "Shasta Webb"
+date: "28/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr); library(fuzzyjoin); library(ggplot2); library(lubridate); library(tidyr); library(lme4); library(car); library(emmeans); library(multcomp); library(multcompView); library(forcats)
+```
+
+### Behavioural Analysis by Stage of Pregnancy & Nursing
+
+In our previous analysis, we modeled the differences in activity budgets between cycling, pregnant, and nursing capuchins with the 2016-2018 scan dataset. Now, we will subset to only the pregnant and nursing capuchins. Then, we will divide up the pregnancies into 3 stages, and the nursing into 3 stages. We will then run similar GLMMs as we did previously, with reproductive state stage as a fixed predictor.
+
+First, we need to read in the cleaned, z-tranformed data that has not yet been grouped. Importantly, because we are grouping the scan data on a per-rotation (2-5-days in length), it is probable that some stages will change within a rotation (i.e., an individual might transition from stage 1 of pregnancy to stage 2 of pregnancy during a 5 day rotation). We have decided that we will not break up rotations further based on transitions between stages of pregnancy or nursing. We will divide rotations in which infants are born, because we know that activity changes notably between the last day of pregnancy and the first day of nursing. However, we do not assume that there is a drastic change in behaviour from the final day of the first stage of pregnancy to the first day of the second stage of pregnancy. We have decided that if a female changes stages within a rotation, when we group it, we will assign her the reproductive stage that represents the majority of the rotation.
+
+#### Data preparation
+
+Reading in z-transformed data frame
+
+The df we are readingin has previously joined reproductive status data. I created a file "RepStatusSSRFemalesCleanCYCLIng_STAGE.csv" which has the cycling stages added (60 days post weaning, post miscarriage, post infant death, pre conception). We need to read in the clean df, remove the rep status columns, then re-join with the cycling stage doc. 
+
+```{r}
+dfz <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/dfz21April.csv", stringsAsFactors = TRUE) #with R 4.0.0 we need to designate this as true
+length(unique(dfz$Animal)) #33 females (pre-filtering)
+sum(dfz$TotalScans) #13721 scans (pre-filtering)
+
+dfzRep <- dfz %>% 
+              mutate(MonthOfYear = format(as.Date(DateOf,format="%Y-%m-%d"),"%Y-%m")) %>% #adding a Month of Year column 
+              dplyr::select(-Rotation, -StartDate, -X, -EndDate, -X.1, -ReproductiveStatus, -Miscarriage, -InfantSurvive1Year, -InfantSurvive3Years) #removing the incorrect rotations and other columns we will not need
+
+#View(dfzRep) #1618 rows
+```
+
+Adding rotation table 
+
+```{r}
+rotations <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/rotationFull.csv")
+rotations <- distinct(rotations) #removing duplicates
+dfzRep <- left_join(dfzRep, rotations, by = c("DateOf" = "Date"))
+```
+
+Adding reproductive status table that includes cycling broken into stages
+
+```{r}
+repStatusTableStage <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/RepStatusSSRFemalesCleanCYCLIng_STAGE.csv")
+
+dfzRep <- dfzRep %>%
+          fuzzy_left_join(., repStatusTableStage, 
+                            by = c("Animal" = "AnimalCode", "DateOf" = "StartDate", "DateOf" = "EndDate"), 
+                            match_fun = list(`==`, `>=`, `<=`)) 
+
+dfzRep <- dplyr::rename(dfzRep, Animal = Animal.x) 
+dfzRep <- select(dfzRep, -Animal.y, -AnimalCode)
+
+```
+
+Figuring out who has been pregnant and nursing
+
+```{r}
+ggplot(data = dfzRep, aes(x = ReproductiveStatus, fill = ReproductiveStatus)) +
+        geom_histogram(stat = "count")+
+        facet_wrap(~Animal)
+```
+
+Sage, Vanilla, Tonks, and Sassafras were only cycling during the study, meaning we will filter them from the stage analysis.
+
+```{r}
+dfzRep <- dfzRep %>%
+          filter(!Animal %in% c("SJ", "VN", "SF", "NP"))
+
+q <- ggplot(dfzRep, aes(color = ReproductiveStatus)) +
+      geom_segment(aes(x=StartDate, xend=EndDate, y=Animal, yend=Animal), size=3); q
+```
+
+Note: The above plot will appear to have gaps in the reproductive cycle. This is due to the fact that there are gaps in data collection between 2016-2018. For some indiviudals, their reproductive stages were not captured in any field season. 
+
+Adding a column for stage of nursing, pregnancy, or cycling. Here, we are dividing nursing into 3 stages and pregnancy into 3 stages. We are also including two cycling stages: pre-conception (60 days before a pregnancy begins) and post-weaning (60 days after an infant is weaned). Note: In the RepStateStage table, I also included cycling post miscarriage, and cycling post infant death. The individuals that fell into those categories were filtered from this dataset, but that data is available for different analysis.
+
+```{r}
+dfzRep$DateOf <- as.Date(dfzRep$DateOf) #change DateOf to a date type
+dfzRep$StartDate <- as.Date(dfzRep$StartDate) #change StartDate to a date type
+dfzRep$EndDate <- as.Date(dfzRep$EndDate) #change EndDate to a date type
+                  
+dfzRep <- dfzRep %>%
+                  mutate(RepStateStage = case_when(ReproductiveStatus == "Nursing" & DateOf >= StartDate & DateOf <= StartDate + days(121) ~ "NursingStage1",
+                                                   ReproductiveStatus == "Nursing" & DateOf >= StartDate + days(122) & DateOf <= StartDate + days(242) ~ "NursingStage2",
+                                                   ReproductiveStatus == "Nursing" & DateOf >= StartDate + days(243) & DateOf <= EndDate ~ "NursingStage3",
+                                                   ReproductiveStatus == "Pregnant" & DateOf >= StartDate & DateOf <= StartDate + days(53) ~ "PregnancyStage1",
+                                                   ReproductiveStatus == "Pregnant" & DateOf >= StartDate + days(54) & DateOf <= StartDate + days(104) ~ "PregnancyStage2",
+                                                   ReproductiveStatus == "Pregnant" & DateOf >= StartDate + days(105) & DateOf <= EndDate ~ "PregnancyStage3",
+                                                   ReproductiveStatus == "Cycling_Pre_Conception" ~ "Cycling_Pre_Conception",
+                                                   ReproductiveStatus == "Cycling_PostWeaning" ~ "Cycling_PostWeaning"))
+```
+
+After adding the stages, filter out NAs (females that did not fall into any of these categories)
+
+```{r}
+dfzRep <- filter(dfzRep, !is.na(RepStateStage)) 
+```
+
+Preparing rep status table for summary plot
+
+```{r}
+repStatusTable <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/RepStatusSSRFemalesClean.csv")
+
+repStatusTable <- repStatusTable %>%
+                       mutate(StartOfStudy = "2014-01-01",
+                              EndOfStudy = "2018-06-30")
+
+repStatusTable$StartOfStudy <- as.Date(repStatusTable$StartOfStudy)
+repStatusTable$EndOfStudy <- as.Date(repStatusTable$EndOfStudy)
+
+repStatusTable$StartDate <- as.Date(repStatusTable$StartDate)
+repStatusTable$EndDate <- as.Date(repStatusTable$EndDate)
+
+`%notin%` <- Negate(`%in%`)
+
+repTable <- repStatusTable %>%
+            mutate(StartDate = case_when(StartDate <= StartOfStudy ~ StartOfStudy, #for the figure, we are subsetting to just dates that fell within the study periods
+                                         StartDate > StartOfStudy ~ StartDate),
+                   EndDate = case_when(EndDate >= EndOfStudy ~ EndOfStudy,
+                                       EndDate < EndOfStudy ~ EndDate)) %>%
+            filter(!EndDate < StartDate) %>%
+            mutate(ReproductiveStatus = ifelse(ReproductiveStatus %notin% c("Pregnant", "Nursing"), "Cycling", ReproductiveStatus))
+            
+repTable$ReproductiveStatus <- factor(repTable$ReproductiveStatus, levels = c("Cycling", "Pregnant", "Nursing"))            
+            
+```
+
+Sumamry figure of rep stages
+
+```{r}
+repTable$Animal <- fct_rev(repTable$Animal)
+
+q2 <- ggplot(repTable, aes(color = ReproductiveStatus)) +
+      geom_segment(aes(x=StartDate, xend=EndDate, y=Animal, yend=Animal), size = 5) +
+      scale_color_manual(values = c("goldenrod2", "darkslategray4", "olivedrab4")) +
+      scale_x_date(breaks = "1 year", date_labels = "%Y", expand = c(0,0)) +
+      theme_minimal() +
+      theme(panel.border = element_blank(),
+            axis.title.x = element_blank(),
+            legend.title = element_blank(),
+            axis.text.x = element_text(vjust = 0.5, hjust = -0.1),
+            legend.position = "bottom") +
+      removeGrid(); q2
+
+ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/repStatusSummaryFigure.pdf", plot = q2, width = 5, height = 6)
+```
+
+
+Collapsing rotations using group_by() and filtering to 3+ scans per rotation
+
+```{r}
+mode <- function(x) { names(which.max(table(x))) }
+
+cats <- c("cat1", "cat1", "cat2")
+mode(cats)
+
+dfzGrouped <- dfzRep %>% 
+              group_by(Rotation, Animal) %>%
+              dplyr::summarise(
+                        Group = unique(Group),
+                        TempMax = mean(TempMax), 
+                        TempMin = mean(TempMin), 
+                        Rainfall_cm = mean(Rainfall_cm), 
+                        MonthlyFruitBiomass = mean(MonthlyFruitBiomass_kg_ha),
+                        DRI = sum(DRI),
+                        EFI = sum(EFI),
+                        EXC = sum(EXC),
+                        FFL = sum(FFL),
+                        FFR = sum(FFR),
+                        FIN = sum(FIN),
+                        FOT = sum(FOT),
+                        OTH = sum(OTH),
+                        PLA = sum(PLA),
+                        RES = sum(RES),
+                        SAC = sum(SAC),
+                        SAG = sum(SAG),
+                        SDI = sum(SDI),
+                        SRE = sum(SRE),
+                        TRA = sum(TRA),
+                        VFO = sum(VFO),
+                        VIG = sum(VIG),
+                        DominanceScale = mean(DominanceScale),
+                        ReproductiveStatus = mode(ReproductiveStatus),
+                        RepStateStage = mode(RepStateStage),
+                        ColorVisionPhenotype = unique(ColorVisionPhenotype),
+                        TotalInsectForaging = sum(TotalInsectForaging),
+                        TotalRestingScans = sum(TotalRestingScans),
+                        TotalForagingScans = sum(TotalForagingScans),
+                        TotalScans = sum(TotalScans),
+                        MonthOfYear = dplyr::first(MonthOfYear)) #if rotations spanned the end of a month, the month the rotation started is included in the grouped df
+
+dfzGrouped <- dfzGrouped %>%
+              mutate(ReproductiveStatus = case_when(ReproductiveStatus == "Cycling_Pre_Conception" ~ "Cycling", 
+                                                    ReproductiveStatus == "Cycling_PostWeaning" ~ "Cycling",
+                                                    ReproductiveStatus == "Pregnant" ~ "Pregnant",
+                                                    ReproductiveStatus == "Nursing" ~ "Nursing")) #changing this back to just cycling for the raw data visualizations
+
+```
+
+The grouping will help us keep some data, but there are still some monkeys with too little data to include. We'll filter to keep only rows with 3 or more scans.
+
+```{r}
+dfzGrouped <- filter(dfzGrouped, TotalScans > 2) #486 rows
+length(unique(dfzGrouped$Animal)) #29 females
+sum(dfzGrouped$TotalScans) #10116 scans
+
+dfzGrouped$DominanceCat <- if_else(dfzGrouped$DominanceScale <= 0.33, "low", if_else(dfzGrouped$DominanceScale > 0.33 & dfzGrouped$DominanceScale <= 0.66, "mid","high")) #turning scale into a categorical variable
+dfzGrouped <- dfzGrouped %>%
+              mutate(DominanceCat = replace_na(DominanceCat, "low")) #replacing NAs with low rank, since the NAs are from young females who acheived adult status in the year, but were not evaluated based on rank
+
+write.csv(dfzGrouped, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/dfzGroupedStage10July.csv")
+```
+
+#### Totals for data collection for reproductive stages analysis
+
+```{r}
+sum(dfzGrouped$TotalScans) #10116
+length(unique(dfzRep$DateOf)) #220 contact days in this subset of data
+sum(dfzGrouped$TotalScans)/length(unique(dfzGrouped$Animal)) #348.8276 scans per animal
+```
+
+#### Plotting the raw data
+
+```{r}
+dfzGrouped$RepStateStage <- factor(dfzGrouped$RepStateStage, levels = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"))
+
+dfzGrouped$ReproductiveStatus <- factor(dfzGrouped$ReproductiveStatus, levels = c("Cycling", "Pregnant", "Nursing"))
+
+
+raw.rest.repStage <- ggplot(data = dfzGrouped, aes(x = RepStateStage, y = TotalRestingScans, fill = ReproductiveStatus)) +
+                         geom_boxplot(alpha = 4/10, width = 0.5) +
+                         scale_fill_manual(values = c("goldenrod1", "darkslategray4", "olivedrab4")) +
+                         scale_x_discrete(limit = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"),
+                                          labels = c("Cycling (Pre-Conception)", "Pregnancy Stage 1", "Pregnancy Stage 2", "Pregnancy Stage 3", "Nursing Stage 1", "Nursing Stage 2", "Nursing Stage 3", "Cycling (Post-Weaning")) +
+                         xlab("") + ylab("\n\nResting scans (Raw counts)\n") +
+                         geom_jitter(alpha = 3/10, height = 0) +
+                         theme_minimal() +
+                         theme(legend.position = "none",
+                               axis.text.x = element_blank()); raw.rest.repStage
+```
+
+
+#### Variance Inflation Factor test for ecological variables. 
+
+This model tests for the variance inflation factor among the ecological variables. A VIF under 2 is considered an acceptable cutoff for correlation of ecological variables. If the score is under 2, the ecological variables can be left in the model. Note that is this model is a Generalized Linear Model, not a GLMM. 
+
+```{r}
+RestModel.vif = glm(TotalRestingScans ~ DominanceCat * 
+                              RepStateStage +
+                              Rainfall_cm +
+                              TempMax +
+                              MonthlyFruitBiomass +
+                              offset(log(TotalScans)), 
+                              data = dfzGrouped,
+                              family = "poisson")
+
+car::vif(RestModel.vif) #all scores under 2
+```
+
+#### Resting model: monkey and ecological variables
+
+*Response variable*: TotalRestingScans (count data)
+
+*Predictor variables*:
+
+_Fixed effects_:
+
+    * DominanceCat: This is a scaled variable from 0-1 taken from the ordinal ranking based on January 2016 SSR ranking. Perdita (lowest ranking) was added to RM, and Buzz (lowest ranking) was changed from top rank to bottom rank after ME's takeover of Admin. 
+    * RepStateStage: Categorical variable that includes Pregnancy Stages 1-3 and Nursing Stages 1-3. Gestation is considered 157 days in this dataset, as per Carnegie et al. 2011. Nursing is considered 365 days.
+      
+      Pregnancy Stage 1: 0-53
+      Pregnancy Stage 2: 54-104
+      Pregnancy Stage 3: 105-158
+
+      Nursing Stage 1: 0-121
+      Nursing Stage 2: 122-242
+      Nursing Stage 3: 243-365
+      
+    * Rainfall_c,: daily rainfall in cm (z-transformed in this model); averaged during group_by step
+    * TempMax: daily max temp in degrees C (z-transformed in this model); averaged during group_by step
+    * TempMin: daily min temp in degreed C (z-transformed in this model); averaged during group_by step
+    * FruitBiomass: monthly fruit biomass taken from PACE database (z-transformed in this model); averaged during group_by step
+    
+_Random Effects_:
+  
+    * Monkey ID nesting within social group (to account for individual variation)
+    
+*Unit of Analysis*: Rotation day of scan data per animal with behavioural states summed
+  
+From Urs: "You have to log-transform the offset because you are using a log-link function. Thus, you are actually testing if log(TotalForagingScans) is associated with dominance etc. (but you are not simply log-transforming your counts as you also use a Poisson distribution and not a Gaussian distribution).
+
+However, you have to correct for effort, thus you actually want to know whether TotalForagingScans/TotalScans is associated with dominance etc. I don’t think this is technically correct, but you can imagine that as testing for log(TotalForagingScans/TotalScans) ~ dominance. However, this is not a count anymore. Because log(m/n) = log(m) - log(n), you can transform this formula to log(TotalForagingScans) - log(TotalScans) ~ dominance, and then to log(TotalForagingScans) ~ dominance + log(TotalScans)." 
+
+*Distribution*: Poisson 
+    The Poisson distribution is an appropriate model if the following assumptions are true.
+
+      * K is the number of times an event occurs in an interval and K can take values 0, 1, 2, …
+      * The occurrence of one event does not affect the probability that a second event will occur. That is, events occur independently.
+      * The rate at which events occur is constant. The rate cannot be higher in some intervals and lower in other intervals.
+      * Two events cannot occur at exactly the same instant.
+      * The probability of an event in a small interval is proportional to the length of the interval.
+      
+```{r}
+dfzGrouped$RepStateStage <- factor(dfzGrouped$RepStateStage, levels = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"))
+
+RestModel <- glmer(TotalRestingScans ~ DominanceCat + 
+                              RepStateStage +
+                              Rainfall_cm +
+                              TempMax +
+                              MonthlyFruitBiomass +
+                              offset(log(TotalScans)) + 
+                              (1 | Group/Animal), 
+                              data = dfzGrouped,
+                              family = poisson(link = "log"),
+                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+
+
+summary(RestModel) #General summary of GLMM
+drop1(RestModel, test = "Chisq") #Displays overall effects of each fixed effect using Chi-square test
+car::Anova(RestModel) #Alternative summary using Type II Wald chisquare tests
+RM.emm <- emmeans(RestModel, "RepStateStage", type = "response", adjust = "tukey") #Using emmeans package instead of lsmeans
+
+RM.cld <- cld(RM.emm, alpha=0.05,
+          Letters=letters,
+          adjust="tukey")
+
+RM.emm.plot <- pwpp(RM.emm, method = "pairwise") #Constructs a plot of P values associated with pairwise comparisons of estimated marginal means.
+pairs(RM.emm)
+
+RM.emm.pairs <- as.data.frame(pairs(RM.emm))
+
+write.csv(RM.emm.pairs, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/RM.emm.pairs.csv")
+
+#### NEED TO MAKE RM.CLD A DF BEFORE MAKING THIS PLOT SO I CAN ADD A COLUMN FOR OVERALL REP STATE
+
+rmDf <- as.data.frame(RM.cld)
+
+rmDf <- rmDf %>%
+        mutate(ReproductiveStatus = case_when(RepStateStage == "Cycling_Pre_Conception" ~ "Cycling",
+                                              RepStateStage == "Cycling_PostWeaning" ~ "Cycling",
+                                              RepStateStage == "PregnancyStage1" ~ "Pregnant",
+                                              RepStateStage == "PregnancyStage2" ~ "Pregnant",
+                                              RepStateStage == "PregnancyStage3" ~ "Pregnant",
+                                              RepStateStage == "NursingStage1" ~ "Nursing",
+                                              RepStateStage == "NursingStage2" ~ "Nursing",
+                                              RepStateStage == "NursingStage3" ~ "Nursing"))
+
+rmDf$ReproductiveStatus <- factor(rmDf$ReproductiveStatus, levels = c("Cycling", "Pregnant", "Nursing"))
+
+RM.plot <- ggplot(rmDf, aes(x = RepStateStage, y = rate, fill = ReproductiveStatus)) +
+           geom_errorbar(aes(ymin  =  rate + SE, ymax  =  rate - SE), width =  0.4, size  =  0.6,  position = position_dodge(width = 0.5)) +
+           geom_point(shape = 21, size = 4, position = position_dodge(width = 0.5)) +
+           scale_y_continuous(limits = c(0, 7)) +
+           scale_fill_manual(values = c("goldenrod1", "darkslategray4", "olivedrab4")) +
+                         scale_x_discrete(limit = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"),
+                                          labels = c("Cycling (Pre-Conception)", "Pregnancy Stage 1", "Pregnancy Stage 2", "Pregnancy Stage 3", "Nursing Stage 1", "Nursing Stage 2", "Nursing Stage 3", "Cycling (Post-Weaning)")) +
+           theme_minimal() +
+           theme(legend.position = "none",
+                 legend.title = element_blank(),
+                 axis.title.x = element_text(size = 14),
+                 axis.text = element_text(size = 10)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95, vjust = 0.9, size = 12)) +
+           theme(plot.title = element_text(lineheight=.8, face="bold", hjust = 0.5)) +
+           labs(x = "", y = "\n\nResting scans (EMMs)\n") ;RM.plot
+
+restingRepStageCombinedPlot <- ggarrange(raw.rest.repStage, RM.plot,
+                                         labels = c("A", "B"),
+                                         ncol = 1, nrow = 2, align = "v"); restingRepStageCombinedPlot
+
+ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/restingRepStageCombinedPlot.pdf", plot = restingRepStageCombinedPlot, width = 5, height = 8)
+```
+
+#### Does our alternative model outperform the null model? Yes. 
+
+```{r}
+RestModel.x <- glmer(TotalRestingScans ~ DominanceCat + 
+                              RepStateStage +
+                              Rainfall_cm +
+                              TempMax +
+                              MonthlyFruitBiomass +
+                              offset(log(TotalScans)) + 
+                              (1 | Group/Animal), 
+                              data = dfzGrouped,
+                              family = poisson(link = "log"),
+                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+
+RestModel.x.null <- glmer(TotalRestingScans ~ 
+                              offset(log(TotalScans)) + 
+                              (1 | Group/Animal), 
+                              data = dfzGrouped,
+                              family = poisson(link = "log"),
+                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+
+
+AIC(RestModel.x, RestModel.x.null) #Use AIC to determine which model performs better. Lower AIC score means better performance. 
+```
+
+#### Foraging models
+
+#### Plotting the raw foraging data
+
+```{r}
+dfzGrouped$RepStateStage <- factor(dfzGrouped$RepStateStage, levels = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"))
+
+dfzGrouped$ReproductiveStatus <- factor(dfzGrouped$ReproductiveStatus, levels = c("Cycling", "Pregnant", "Nursing"))
+
+raw.forage.repStage <- ggplot(data = dfzGrouped, aes(x = RepStateStage, y = TotalForagingScans, fill = ReproductiveStatus)) +
+                         geom_boxplot(alpha = 4/10, width = 0.5) +
+                         scale_fill_manual(values = c("goldenrod1", "darkslategray4", "olivedrab4")) +
+                         scale_x_discrete(limit = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"),
+                                          labels = c("Cycling (Pre-Conception)", "Pregnancy Stage 1", "Pregnancy Stage 2", "Pregnancy Stage 3", "Nursing Stage 1", "Nursing Stage 2", "Nursing Stage 3", "Cycling (Post-Weaning")) +
+                         xlab("") + ylab("\n\nForaging scans (Raw counts)\n") +
+                         geom_jitter(alpha = 3/10, height = 0) +
+                         theme_minimal() +
+                         theme(legend.position = "none",
+                               axis.text.x = element_blank()); raw.forage.repStage
+```
+
+```{r}
+ForageModel <- glmer(TotalForagingScans ~ DominanceCat + 
+                              RepStateStage +
+                              Rainfall_cm +
+                              #TempMax + 
+                              MonthlyFruitBiomass +
+                              offset(log(TotalScans)) + 
+                              (1 | Group/Animal), 
+                              data = dfzGrouped,
+                              family = poisson(link = "log"),
+                              glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+
+summary(ForageModel)
+drop1(ForageModel, test = "Chisq")
+Anova(ForageModel)
+```
+
+#### Plotting the estimated marginal means for the Forage Model
+
+```{r}
+ForageModel.emm <- (emmeans(ForageModel, "RepStateStage", type = "response", adjust = "tukey"))
+
+FM.emm.pairs <- as.data.frame(pairs(ForageModel.emm))
+write.csv(FM.emm.pairs, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Tables/FM.emm.pairs.csv")
+ForageModel.emm.plot <- pwpp(ForageModel.emm, method = "pairwise")
+ForageModel.emm.cld.tukey <- cld(ForageModel.emm, alpha = 0.05, Letters = letters, adjust = "tukey")
+FM <- ForageModel.emm.cld.tukey
+FMdf <- as.data.frame(FM)
+```
+
+```{r}
+FMdf <- FMdf %>%
+        mutate(ReproductiveStatus = case_when(RepStateStage == "Cycling_Pre_Conception" ~ "Cycling",
+                                              RepStateStage == "Cycling_PostWeaning" ~ "Cycling",
+                                              RepStateStage == "PregnancyStage1" ~ "Pregnant",
+                                              RepStateStage == "PregnancyStage2" ~ "Pregnant",
+                                              RepStateStage == "PregnancyStage3" ~ "Pregnant",
+                                              RepStateStage == "NursingStage1" ~ "Nursing",
+                                              RepStateStage == "NursingStage2" ~ "Nursing",
+                                              RepStateStage == "NursingStage3" ~ "Nursing"))
+```
+
+#### Foraging EMMs plot
+
+```{r}
+FM.plot <- ggplot(FMdf, aes(x = RepStateStage, y = rate, fill = ReproductiveStatus)) +
+           geom_errorbar(aes(ymin  =  rate + SE, ymax  =  rate - SE), width =  0.4, size  =  0.6,  position = position_dodge(width = 0.5)) +
+           geom_point(shape = 21, size = 4, position = position_dodge(width = 0.5)) +
+           scale_y_continuous(limits = c(0, 15)) +
+           scale_fill_manual(values = c("goldenrod1", "darkslategray4", "olivedrab4")) +
+                         scale_x_discrete(limit = c("Cycling_Pre_Conception", "PregnancyStage1", "PregnancyStage2", "PregnancyStage3", "NursingStage1", "NursingStage2", "NursingStage3", "Cycling_PostWeaning"),
+                                          labels = c("Cycling (Pre-Conception)", "Pregnancy Stage 1", "Pregnancy Stage 2", "Pregnancy Stage 3", "Nursing Stage 1", "Nursing Stage 2", "Nursing Stage 3", "Cycling (Post-Weaning)")) +
+           theme_minimal() +
+           theme(legend.position = "none",
+                 legend.title = element_blank(),
+                 axis.title.x = element_text(size = 14),
+                 axis.text = element_text(size = 10)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95, vjust = 0.9, size = 12)) +
+           theme(plot.title = element_text(lineheight=.8, face="bold", hjust = 0.5)) +
+           labs(x = "", y = "\n\nForaging scans (EMMs)\n") ;FM.plot
+```
+
+#### combining plots
+
+```{r}
+foragingRepStageCombinedPlot <- ggarrange(raw.forage.repStage, FM.plot,
+                                         labels = c("A", "B"),
+                                         ncol = 1, nrow = 2, align = "v"); foragingRepStageCombinedPlot
+
+ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/foragingRepStageCombinedPlot.pdf", plot = foragingRepStageCombinedPlot, width = 5, height = 8)
+```
+
