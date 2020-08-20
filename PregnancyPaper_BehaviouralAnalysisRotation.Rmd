@@ -40,7 +40,7 @@ library(fuzzyjoin)
 The reproductive status information still needs to be added to the data. Here we will sort out all the females, combine the data into one dataframe, then add reproductive status info in Excel. Once that data is sorted, we will then add fruit biomass data and color vision phenotypes back in using R. 
 
 ```{r}
-df16 <- read.csv('~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/CSVs/2016_BehData.csv')
+df16 <- read.csv('BehaviouralData/BehaviorData/CSVs/2016_BehData.csv')
 df16 <- data.frame(df16, stringsAsFactors = FALSE)
 females2016 <- c("SS", "CH", "OR", "CE", "SF", "TH", "VN", "SJ", "SI", "ED", "KI", "SH", "LU", "FT", "LA", "PR", "ZA", "BO", "AB", "PT", "RS", "PD", "QD", "WK", "SP", "LM", "TS", "MI", "BT", "LL", "MW")
 
@@ -54,7 +54,7 @@ dff2016 %>% group_by(Animal, Group) %>% summarise()
 #### 2017 filtering
 
 ```{r}
-df17 <- read.csv('~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/CSVs/2017_BehData.csv')
+df17 <- read.csv('BehaviouralData/BehaviorData/CSVs/2017_BehData.csv')
 df17 <- data.frame(df17, stringsAsFactors = FALSE)
 females2017 <- c("BO", "AB", "TS", "LM", "MI", "BT", "ZA", "SI", "LU", "PR", "FT", "SH", "KI", "ED", "LA", "PT", "LL", "QD", "PD", "WK", "RS", "SP", "MW", "SS", "OR", "TH", "SJ", "CE", "VN", "CH")
 
@@ -66,7 +66,7 @@ dff2017 <- df17 %>%
 #### 2018 filtering
 
 ```{r}
-df18 <- read.csv('~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/CSVs/2018_BehData.csv') 
+df18 <- read.csv('BehaviouralData/BehaviorData/CSVs/2018_BehData.csv') 
 df18 <- data.frame(df18, stringsAsFactors = FALSE)
 females2018 <- c("PT", "LL", "QD", "PD", "HI", "NP", "SP", "WK", "RS", "MW", "BO", "TS", "AB", "LM", "BT", "MI", "ZA")
 
@@ -111,7 +111,7 @@ combinedDFtest <- combinedDF %>%
 df <- combinedDFtest %>%
             distinct(Animal, Group) #this returns only correct animal-group pairings
 combinedDF <- combinedDFtest #renaming so that combined DF is the clean one
-write.csv(combinedDF, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/CSVs/combinedDFclean.csv")
+write.csv(combinedDF, "BehaviouralData/BehaviorData/CSVs/combinedDFclean.csv")
 ```
 
 #### Reading in combined (clean) dataframe
@@ -119,7 +119,7 @@ write.csv(combinedDF, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Behavior
 The above chunks were run originally to generate one combined dataset that has been exported. Now we will read in that csv and proceed with analysis.
 
 ```{r}
-combinedDF <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/CSVs/combinedDFclean.csv")
+combinedDF <- read.csv("BehaviouralData/BehaviorData/CSVs/combinedDFclean.csv")
 combinedDF <- as.data.frame(combinedDF) #;View(combinedDF) #1618 rows
 View(combinedDF)
 ```
@@ -129,36 +129,36 @@ View(combinedDF)
 This table was originally extracted from the larger dataset. Extreme rain days (>10cm in 24 hours) were determined and each rotation was given a specific name. Here we will left join on the "DateOf" to add rotation to the combinedDF. During some rotations, babies were born, which changes rep status of a group member. These rotations are signified with an "R" behind the number. This allows for grouping while maintaining distinct rep statuses. 
 
 ```{r}
-rotationTable <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/rotationDate.csv")
+rotationTable <- read.csv("BehaviouralData/BehaviorData/rotationFull.csv")
 rotationTable <- as.data.frame(rotationTable)
 rotationTable <- rotationTable %>%
-                 dplyr::select(-X) %>%
+                 #dplyr::select(-X) %>%
                  distinct()
 
 combinedDF <- combinedDF %>% #1618 rows
-              left_join(., rotationTable, by = c("DateOf" = "DateOfYear")) #;View(combinedDF) #ensure that the left join worked correctly and no duplicated rows were produced
+              left_join(., rotationTable, by = c("DateOf" = "Date")) #;View(combinedDF) #ensure that the left join worked correctly and no duplicated rows were produced
 ```
 
 #### Adding color vision & dominance information to combinedDF
 
 ```{r}
-colorVisionTable <- as.data.frame(read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/ColorVisionPhenotypes.csv"))
+#colorVisionTable <- as.data.frame(read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/ColorVisionPhenotypes.csv"))
 
-combinedDFcolor <- combinedDF %>% #1618
-              left_join(., colorVisionTable, by = c("Animal" = "AnimalCode")) #;View(combinedDF)
+#combinedDFcolor <- combinedDF %>% #1618
+#              left_join(., colorVisionTable, by = c("Animal" = "AnimalCode")) #;View(combinedDF)
 
-combinedDF <- combinedDFcolor
+#combinedDF <- combinedDFcolor
 ```
 
 #### Adding dominance scale data
 
 ```{r}
-dominanceTable <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/DominanceScale16_18.csv")
+dominanceTable <- read.csv("BehaviouralData/EcologicalDataCensus/DominanceScale16_18.csv")
 dominanceTable <- as.data.frame(dominanceTable)
 
 combinedDFdom <- combinedDF %>% #1618
-              fuzzy_left_join(., dominanceTable, 
-                              by = c("Animal" = "Animal", "DateOf" = "StartYear", "DateOf" = "EndYear"), match_fun = 
+                 fuzzy_left_join(., dominanceTable, 
+                              by = c("Animal" = "Animal", "DateOf" = "StartYear", "DateOf" = "EndYear"), #match_fun = 
                               list(`==`, `>=`, `<=`)) #;View(combinedDF)
 
 combinedDF <- combinedDFdom
@@ -168,15 +168,13 @@ combinedDF <- combinedDFdom
 
 ```{r}
 combinedDF <- combinedDF %>% #1618 rows
-              dplyr::select(-X, -Animal.y, -StartYear, -EndYear)
-combinedDF <- combinedDF %>%
-              rename(Animal = Animal.x)
+              dplyr::select(-X)
 ```
 
 #### Adding reproductive statuses
 
 ```{r}
-repStatusTable <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/RepStatusSSRFemalesClean.csv")
+repStatusTable <- read.csv("BehaviouralData/EcologicalDataCensus/RepStatusSSRFemalesClean.csv")
 repStatusTable <- as.data.frame(repStatusTable)
 
 combinedDFrep <- combinedDF %>% #1618 rows
@@ -191,7 +189,7 @@ combinedDF <- combinedDFrep
 
 ```{r}
 combinedDF <- combinedDF %>% #1618 rows
-              dplyr::select(-Animal.y, -AnimalCode) %>%
+              dplyr::select(-Animal.y, -AnimalCode, -X, -X.1) %>%
               rename(Animal = Animal.x) #;View(combinedDF)
 combinedDFCopy <- combinedDF #saving a copy of the correct DF here
 ```
@@ -199,7 +197,7 @@ combinedDFCopy <- combinedDF #saving a copy of the correct DF here
 #### Adding monthly biomass (kg/ha) data
 
 ```{r}
-fruitBiomassTable <- as.data.frame(read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/EcologicalDataCensus/MonthlyFruitBiomass.csv"))
+fruitBiomassTable <- as.data.frame(read.csv("BehaviouralData/EcologicalDataCensus/MonthlyFruitBiomass.csv"))
 fruitBiomassTable <- fruitBiomassTable %>%
                      mutate(MonthOfYear = format(as.Date(YearOf,format="%Y-%m-%d"),"%Y-%m")) 
                     #;View(fruitBiomassTable)
@@ -249,16 +247,20 @@ dfz <- dfz %>%
        mutate(TotalScans = rowSums(dplyr::select(., DRI:VIG))) %>%
        mutate(TotalScans = ifelse(is.na(TotalScans),0,TotalScans)) #;View(dfz)
 
-dfzArranged <- dfz %>%
-               dplyr::select(DateOf, Animal, Rotation, ReproductiveStatus, Group, TempMax, Rainfall_cm, DRI, EFI, EXC, FFL, FFR, FIN, FOT, OTH, PLA, RES, SAC, SAG, SDI, SRE, TRA, VFO, VIG, TotalRestingScans, TotalForagingScans, TotalInsectForaging, TotalScans, Miscarriage, InfantSurvive1Year, InfantSurvive3Years, StartDate, EndDate, DominanceScale, DominanceCat, MonthlyFruitBiomass_kg_ha, ColorVisionPhenotype)
+dfz <- dfz %>%
+       dplyr::select(-Animal.y, StartYear, EndYear) %>%
+       rename(Animal = Animal.x)
 
-write_csv(dfz, "~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/dfz21April.csv") #saving the updated DF in a new file
+dfzArranged <- dfz %>%
+               dplyr::select(DateOf, Animal, Rotation, ReproductiveStatus, Group, TempMax, Rainfall_cm, DRI, EFI, EXC, FFL, FFR, FIN, FOT, OTH, PLA, RES, SAC, SAG, SDI, SRE, TRA, VFO, VIG, TotalRestingScans, TotalForagingScans, TotalInsectForaging, TotalScans, Miscarriage, InfantSurvive1Year, InfantSurvive3Years, StartDate, EndDate, DominanceScale, DominanceCat, MonthlyFruitBiomass_kg_ha)
+
+write_csv(dfzArranged, "BehaviouralData/BehaviorData/dfz20august.csv") #saving the updated DF in a new file
 ```
 
 Since we will be collapsing the data into the different rotations, thereby losing specific date information, we may still want month and year data. 
 
 ```{r}
-dfz <- read.csv("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/BehaviorData/dfz21April.csv")
+dfz <- read.csv("BehaviouralData/BehaviorData/dfz20august.csv")
 dfz <- as.data.frame(dfz)
 dfz <- dfz %>% 
       mutate(MonthOfYear = format(as.Date(DateOf,format="%Y-%m-%d"),"%Y-%m"))
@@ -275,7 +277,6 @@ dfzGrouped <- dfz %>%
               summarise( 
                         Group = unique(Group),
                         TempMax = mean(TempMax), 
-                        TempMin = mean(TempMin), 
                         Rainfall_cm = mean(Rainfall_cm), 
                         MonthlyFruitBiomass = mean(MonthlyFruitBiomass_kg_ha),
                         DRI = sum(DRI),
@@ -297,7 +298,6 @@ dfzGrouped <- dfz %>%
                         VIG = sum(VIG),
                         DominanceScale = mean(DominanceScale),
                         ReproductiveStatus = unique(ReproductiveStatus),
-                        ColorVisionPhenotype = unique(ColorVisionPhenotype),
                         TotalInsectForaging = sum(TotalInsectForaging),
                         TotalRestingScans = sum(TotalRestingScans),
                         TotalForagingScans = sum(TotalForagingScans),
@@ -393,20 +393,23 @@ RestModel <- glmer(TotalRestingScans ~ DominanceCat +
                               offset(log(TotalScans)) + 
                               (1 | Group/Animal), 
                               data = dfzGrouped,
-                              family = poisson(link = "log"),
-                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+                              family = poisson(link = "log"))
 
 summary(RestModel) #General summary of GLMM
 drop1(RestModel, test = "Chisq") #Displays overall effects of each fixed effect using Chi-square test
 Anova(RestModel) #Alternative summary using Type II Wald chisquare tests
-RM.emm <- emmeans(RestModel, "ReproductiveStatus", type = "response", adjust = "tukey") #Using emmeans package instead of lsmeans
 
+RM.3states.RESULTS <- as.data.frame(Anova(RestModel))
+write.csv(RM.3states.RESULTS, "RM.3states.RESULTS.csv")
+
+RM.emm <- emmeans(RestModel, "ReproductiveStatus", type = "response", adjust = "tukey") #Using emmeans package instead of lsmeans
 RM.cld <- cld(RM.emm, alpha=0.05,
           Letters=letters,
           adjust="tukey")
 
 RM.emm.plot <- pwpp(RM.emm, method = "pairwise") #Constructs a plot of P values associated with pairwise comparisons of estimated marginal means.
-pairs(RM.emm)
+RM.emm.3states <- as.data.frame(pairs(RM.emm))
+write.csv(RM.emm.3states, "BehaviouralData/Tables/RM.emm.3states.csv")
 
 RM.plot <- ggplot(RM.cld, aes(x = ReproductiveStatus, y = rate, fill = ReproductiveStatus)) +
            geom_errorbar(aes(ymin  =  rate + SE, ymax  =  rate - SE), width =  0.4, size  =  0.6,  position = position_dodge(width = 0.5)) +
@@ -424,11 +427,13 @@ RM.plot <- ggplot(RM.cld, aes(x = ReproductiveStatus, y = rate, fill = Reproduct
                  plot.title = element_text(lineheight=.8, face="bold", hjust = 0.5)) +
            labs(x = "", y = "\n\nResting scans (EMMs)\n") ;RM.plot
 
-SI_figure_Rest <- ggarrange(raw.rest.Rep, RM.plot,
-                            labels = c("A", "B"),
-                            ncol = 1, nrow = 2, align = "v"); SI_figure_Rest
+#SI_figure_Rest <- ggarrange(raw.rest.Rep, RM.plot,
+#                            labels = c("A", "B"),
+#                            ncol = 1, nrow = 2, align = "v"); SI_figure_Rest
 
-ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/SI_Figure_Rest.pdf", plot = SI_figure_Rest, width = 4, height = 6)
+ggsave("BehaviouralData/Figures/restModel3States.pdf", plot = RM.plot, height = 5, width = 5)
+
+#ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/SI_Figure_Rest.pdf", plot = SI_figure_Rest, width = 4, height = 6)
 
 ```
 
@@ -443,15 +448,13 @@ RestModel.x <- glmer(TotalRestingScans ~ DominanceCat +
                               offset(log(TotalScans)) + 
                               (1 | Group/Animal), 
                               data = dfzGrouped,
-                              family = poisson(link = "log"),
-                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+                              family = poisson(link = "log"))
 
 RestModel.x.null <- glmer(TotalRestingScans ~ 
                               offset(log(TotalScans)) + 
                               (1 | Group/Animal), 
                               data = dfzGrouped,
-                              family = poisson(link = "log"),
-                              glmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
+                              family = poisson(link = "log"))
 
 
 AIC(RestModel.x, RestModel.x.null) #Use AIC to determine which model performs better. Lower AIC score means better performance. 
@@ -483,19 +486,20 @@ ForageModel <- glmer(TotalForagingScans ~ DominanceCat +
                               offset(log(TotalScans)) + 
                               (1 | Group/Animal), 
                               data = dfzGrouped,
-                              family = poisson(link = "log"),
-                              glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+                              family = poisson(link = "log"))
 
 summary(ForageModel)
 drop1(ForageModel, test = "Chisq")
-Anova(ForageModel)
+forageModel3states <- as.data.frame(Anova(ForageModel))
+write.csv(forageModel3states, "BehaviouralData/Tables/forageModel3statesRESULTS.csv")
 ```
 
 #### Plotting the estimated marginal means for the Forage Model
 
 ```{r}
 ForageModel.emm <- (emmeans(ForageModel, "ReproductiveStatus", type = "response", adjust = "tukey"))
-pairs(ForageModel.emm)
+FM.emm.3states <- pairs(ForageModel.emm)
+write.csv(FM.emm.3states, "FM.emm.3states.csv")
 plot(ForageModel.emm, comparisons = TRUE, alpha = 0.5)
 ForageModel.emm.cld.tukey <- cld(ForageModel.emm, alpha = 0.05, Letters = letters, adjust = "tukey")
 FM <- ForageModel.emm.cld.tukey
@@ -516,11 +520,11 @@ FM.plot <- ggplot(FM, aes(x = ReproductiveStatus, y = rate, fill = ReproductiveS
                  plot.title = element_text(lineheight=.8, face="bold", hjust = 0.5)) +
            labs(x = "", y = "\n\nForaging scans (EMMs)\n") ;FM.plot 
 
-SI_figure_foraging <- ggarrange(raw.forage.Rep, FM.plot,
-                                         labels = c("A", "B"),
-                                         ncol = 1, nrow = 2, align = "v"); SI_figure_foraging
+#SI_figure_foraging <- ggarrange(raw.forage.Rep, FM.plot,
+                                         #labels = c("A", "B"),
+                                         #ncol = 1, nrow = 2, align = "v"); SI_figure_foraging
 
-ggsave("~/Desktop/PregnancyPaper2019/BehaviouralAnalysis/Figures/SI_figure_foraging.pdf", plot = SI_figure_foraging, width = 4, height = 6)
+ggsave("BehaviouralData/Figures/SI_figure_foraging3states.pdf", plot = FM.plot, width = 4, height = 4)
 
 ```
 
